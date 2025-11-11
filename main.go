@@ -10,6 +10,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
+	openai "github.com/sashabaranov/go-openai"
 )
 
 func main() {
@@ -43,7 +44,7 @@ func main() {
 	// コマンド登録
 	cmd := &discordgo.ApplicationCommand{
 		Name:        "ping",
-		Description: "Ping the bot",
+		Description: "うんちくを返します（AI生成）",
 	}
 	createdCmd, err := session.ApplicationCommandCreate(session.State.User.ID, "", cmd)
 	if err != nil {
@@ -76,16 +77,47 @@ func shutdown(s *discordgo.Session, _ context.Context, createdCmd *discordgo.App
 }
 
 func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
 	if i.ApplicationCommandData().Name != "ping" {
 		return
 	}
-	response := &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content: "うんちくん",
-		},
-	}
-	_ = s.InteractionRespond(i.Interaction, response)
+	// まずはDeferredで応答（3秒制限回避）
+	_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+	// 別ゴルーチンでAI生成してフォローアップ
+	go func(interaction *discordgo.Interaction) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		text := generateUnchiku(ctx)
+		_, _ = s.InteractionResponseEdit(interaction, &discordgo.WebhookEdit{
+			Content: &text,
+		})
+	}(i.Interaction)
 }
 
-
+func generateUnchiku(ctx context.Context) string {
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		return "（設定ヒント）環境変数 OPENAI_API_KEY を設定するとAIがうんちくを返します。"
+	}
+	client := openai.NewClient(apiKey)
+	resp, err := client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model: "gpt-4o-mini",
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: "あなたは博識で、短く面白い“うんちく”を日本語で1〜2文で返します。事実ベースで、出典表記や箇条書きは不要。絵文字は使わない。"},
+				{Role: openai.ChatMessageRoleUser, Content: "ランダムな面白いうんちくを1つ教えて。"},
+			},
+			Temperature: 0.8,
+			MaxTokens:   120,
+		},
+	)
+	if err != nil || len(resp.Choices) == 0 {
+		return "うんちくの生成に失敗しました。時間をおいて再度お試しください。"
+	}
+	return resp.Choices[0].Message.Content
+}

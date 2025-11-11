@@ -8,11 +8,13 @@
 
 ### 環境変数
 - `DISCORD_TOKEN`: DiscordのBotトークン（`.env` に設定）
+- `OPENAI_API_KEY`: OpenAIのAPIキー（AIうんちく生成に使用）
 
 リポジトリ直下に `.env` を作成し、以下のように設定してください。
 
 ```
 DISCORD_TOKEN=YOUR_BOT_TOKEN_HERE
+OPENAI_API_KEY=YOUR_OPENAI_API_KEY
 ```
 
 ### セットアップ
