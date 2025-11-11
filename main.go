@@ -25,17 +25,31 @@ func main() {
 	if err != nil {
 		log.Fatalf("Discordセッションの作成に失敗しました: %v", err)
 	}
-	// 必要なIntentを設定（メッセージ受信）
-	session.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsMessageContent
+	// 最小のIntent（スラッシュコマンドはMessage Content不要）
+	session.Identify.Intents = discordgo.IntentsGuilds
 
-	// ハンドラー登録
-	session.AddHandler(onMessageCreate)
+	// スラッシュコマンドのハンドラー登録
+	session.AddHandler(onInteractionCreate)
+	log.Println("ハンドラー登録完了")
 
 	// 接続開始
 	if err := session.Open(); err != nil {
 		log.Fatalf("Discordへの接続に失敗しました: %v", err)
+	} else {
+		log.Println("Discordへの接続成功")
 	}
 	log.Println("Bot が起動しました。Ctrl+C で終了します。")
+
+	// コマンド登録
+	cmd := &discordgo.ApplicationCommand{
+		Name:        "ping",
+		Description: "Ping the bot",
+	}
+	createdCmd, err := session.ApplicationCommandCreate(session.State.User.ID, "", cmd)
+	if err != nil {
+		log.Fatalf("アプリケーションコマンド登録に失敗しました: %v", err)
+	}
+	log.Printf("コマンド登録: /%s", createdCmd.Name)
 
 	// グレースフルシャットダウン
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -45,28 +59,33 @@ func main() {
 	log.Println("シャットダウン中...")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := shutdown(session, shutdownCtx); err != nil {
+	if err := shutdown(session, shutdownCtx, createdCmd); err != nil {
 		log.Printf("シャットダウンでエラー: %v", err)
 	}
 	log.Println("終了しました。")
 }
 
-func shutdown(s *discordgo.Session, _ context.Context) error {
+func shutdown(s *discordgo.Session, _ context.Context, createdCmd *discordgo.ApplicationCommand) error {
+	// 作成したアプリケーションコマンドを削除
+	if createdCmd != nil {
+		if err := s.ApplicationCommandDelete(s.State.User.ID, "", createdCmd.ID); err != nil {
+			log.Printf("コマンド削除に失敗しました: %v", err)
+		}
+	}
 	return s.Close()
 }
 
-func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-	// 自分のメッセージは無視
-	if m.Author == nil || m.Author.ID == s.State.User.ID {
+func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.ApplicationCommandData().Name != "ping" {
 		return
 	}
-
-	switch m.Content {
-	case "!ping":
-		_, _ = s.ChannelMessageSend(m.ChannelID, "Pong!")
-	case "!help":
-		_, _ = s.ChannelMessageSend(m.ChannelID, "使い方: `!ping` で応答します。")
+	response := &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: "うんちくん",
+		},
 	}
+	_ = s.InteractionRespond(i.Interaction, response)
 }
 
 
