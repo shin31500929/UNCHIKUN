@@ -1,0 +1,15 @@
+# Binaries
+bot
+*.exe
+*.out
+*.log
+
+# Go
+bin/
+dist/
+coverage.*
+
+# Env files
+.env
+
+
