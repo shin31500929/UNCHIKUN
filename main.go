@@ -42,15 +42,46 @@ func main() {
 	log.Println("Bot が起動しました。Ctrl+C で終了します。")
 
 	// コマンド登録
-	cmd := &discordgo.ApplicationCommand{
+	pingCmd := &discordgo.ApplicationCommand{
 		Name:        "ping",
 		Description: "うんちくを返します（AI生成）",
 	}
-	createdCmd, err := session.ApplicationCommandCreate(session.State.User.ID, "", cmd)
+	createdPingCmd, err := session.ApplicationCommandCreate(session.State.User.ID, "", pingCmd)
 	if err != nil {
 		log.Fatalf("アプリケーションコマンド登録に失敗しました: %v", err)
 	}
-	log.Printf("コマンド登録: /%s", createdCmd.Name)
+	log.Printf("コマンド登録: /%s", createdPingCmd.Name)
+
+	// /timen コマンド登録
+	timenCmd := &discordgo.ApplicationCommand{
+		Name:        "timen",
+		Description: "対面の通知を送信します",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "unchiku",
+				Description: "任意のテキスト（うんちく）",
+				Required:    true,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "location",
+				Description: "任意の場所",
+				Required:    true,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "time",
+				Description: "任意の時刻",
+				Required:    true,
+			},
+		},
+	}
+	createdTimenCmd, err := session.ApplicationCommandCreate(session.State.User.ID, "", timenCmd)
+	if err != nil {
+		log.Fatalf("アプリケーションコマンド登録に失敗しました: %v", err)
+	}
+	log.Printf("コマンド登録: /%s", createdTimenCmd.Name)
 
 	// グレースフルシャットダウン
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -60,17 +91,19 @@ func main() {
 	log.Println("シャットダウン中...")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := shutdown(session, shutdownCtx, createdCmd); err != nil {
+	if err := shutdown(session, shutdownCtx, createdPingCmd, createdTimenCmd); err != nil {
 		log.Printf("シャットダウンでエラー: %v", err)
 	}
 	log.Println("終了しました。")
 }
 
-func shutdown(s *discordgo.Session, _ context.Context, createdCmd *discordgo.ApplicationCommand) error {
+func shutdown(s *discordgo.Session, _ context.Context, createdCmds ...*discordgo.ApplicationCommand) error {
 	// 作成したアプリケーションコマンドを削除
-	if createdCmd != nil {
-		if err := s.ApplicationCommandDelete(s.State.User.ID, "", createdCmd.ID); err != nil {
-			log.Printf("コマンド削除に失敗しました: %v", err)
+	for _, cmd := range createdCmds {
+		if cmd != nil {
+			if err := s.ApplicationCommandDelete(s.State.User.ID, "", cmd.ID); err != nil {
+				log.Printf("コマンド削除に失敗しました: %v", err)
+			}
 		}
 	}
 	return s.Close()
@@ -80,22 +113,27 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if i.Type != discordgo.InteractionApplicationCommand {
 		return
 	}
-	if i.ApplicationCommandData().Name != "ping" {
-		return
-	}
-	// まずはDeferredで応答（3秒制限回避）
-	_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
-	})
-	// 別ゴルーチンでAI生成してフォローアップ
-	go func(interaction *discordgo.Interaction) {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		text := generateUnchiku(ctx)
-		_, _ = s.InteractionResponseEdit(interaction, &discordgo.WebhookEdit{
-			Content: &text,
+
+	commandName := i.ApplicationCommandData().Name
+
+	switch commandName {
+	case "ping":
+		// まずはDeferredで応答（3秒制限回避）
+		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
 		})
-	}(i.Interaction)
+		// 別ゴルーチンでAI生成してフォローアップ
+		go func(interaction *discordgo.Interaction) {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			text := generateUnchiku(ctx)
+			_, _ = s.InteractionResponseEdit(interaction, &discordgo.WebhookEdit{
+				Content: &text,
+			})
+		}(i.Interaction)
+	case "timen":
+		HandleTimenCommand(s, i)
+	}
 }
 
 func generateUnchiku(ctx context.Context) string {
